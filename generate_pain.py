@@ -4,28 +4,38 @@ https://www.nordea.com/en/doc/corporate-access-payables-pain-001-examples-v1.8.p
 
 """
 import argparse
+import dataclasses
 import datetime
-from dataclasses import dataclass
+import json
+import time
 from pathlib import Path
 
-from lxml import etree
 import toml
+from lxml import etree
 
 
-@dataclass
+@dataclasses.dataclass
 class Payment:
-    """Receiver info."""
+    """Payment info."""
 
-    id: int
-    gross: float
+    issuer: str
+    invoice_number: int
+    amount: int
+    date_due: str
+    account_number: str
+    currency: str
 
 
-@dataclass
-class Common:
-    """Common info."""
+@dataclasses.dataclass
+class Debtor:
+    """Debtor info."""
 
-    orgnbr: int
-    period: str
+    name: str
+    id_nbr: int
+    bic: str
+    iban: str
+    country: str
+
 
 NSMAP = {
     None: "urn:iso:std:iso:20022:tech:xsd:pain.001.001.03",
@@ -34,12 +44,11 @@ NSMAP = {
 
 
 def id_entry(org_nbr):
-    id_0 = etree.Element("Id")
-    org_id = etree.SubElement(id_0, "OrgId")
+    id_ = etree.Element("Id")
+    org_id = etree.SubElement(id_, "OrgId")
     othr = etree.SubElement(org_id, "Othr")
-    id_1 = etree.SubElement(othr, "Id")
-    id_1.text = str(org_nbr)
-    return id_0
+    etree.SubElement(othr, "Id").text = str(org_nbr)
+    return id_
 
 
 def initg_pty(org_nbr):
@@ -49,38 +58,13 @@ def initg_pty(org_nbr):
     return initg_pty
 
 
-def payment(amount, ocr, date):
-    pmt_inf = etree.Element("PmtInf")
-    pmt_inf_id = etree.SubElement(pmt_inf, "PmtInfId")
-    pmt_inf_id.text = "Tmp text"  # FIXME
-    pmt_mtd = etree.SubElement(pmt_inf, "PmtMtd")
-    pmt_mtd.text = "TRF"
-    reqd_extn_dt = etree.SubElement(pmt_inf, "ReqdExctnDt")
-    reqd_extn_dt.text = date.isoformat()
-
-    dbtr = etree.SubElement(pmt_inf, "Dbtr")
-    nm = etree.SubElement(dbtr, "Nm")
-    nm.text = "Fixme"  # FIXME
-    dbtr.append(id_entry(888))  #FIXME org_nbr
-    ctry_of_res = etree.SubElement(dbtr, "CtryOfRes")
-    ctry_of_res.text = "SE"  # FIXME
-
-    dbtr_acct = etree.SubElement(pmt_inf, "DbtrAcct")
-    dbtr_acct_id = etree.SubElement(dbtr_acct, "Id")
-    dbtr_iban = etree.SubElement(dbtr_acct_id, "IBAN")
-    dbtr_iban.text = str(88)  # FIXME
-
-    dbtr_agt = etree.SubElement(pmt_inf, "DbtrAgt")
-    fin_inst_id = etree.SubElement(dbtr_agt, "FinInstnId")
-    bic = etree.SubElement(fin_inst_id, "BIC")
-    bic.text= "HANDSESS" # FIXME
-
-    cdt_trf_tx_inf = etree.SubElement(pmt_inf, "CdtTrfTxInf")
+def credit_transfer(payment):
+    cdt_trf_tx_inf = etree.Element("CdtTrfTxInf")
     pmt_id = etree.SubElement(cdt_trf_tx_inf, "PmtId")
-    instr_id = etree.SubElement(pmt_id, "InstrId")
-    instr_id.text = "FIXME"  # FIXME
-    end_to_end_id = etree.SubElement(pmt_id, "EndToEndId")
-    end_to_end_id.text = "FIXME"  # FIXME
+    etree.SubElement(pmt_id, "InstrId").text = str(payment.invoice_number)
+    etree.SubElement(
+        pmt_id, "EndToEndId"
+    ).text = f"{payment.issuer} {payment.invoice_number}"
 
     pmt_tp_inf = etree.SubElement(cdt_trf_tx_inf, "PmtTpInf")
     svc_lvl = etree.SubElement(pmt_tp_inf, "SvcLvl")
@@ -89,7 +73,9 @@ def payment(amount, ocr, date):
     etree.SubElement(ctgy_purp, "Cd").text = "SUPP"
 
     amt = etree.SubElement(cdt_trf_tx_inf, "Amt")
-    etree.SubElement(amt, "InstdAmt", Ccy="SEK").text = str(f"{100:.2f}")  # FIXME
+    etree.SubElement(amt, "InstdAmt", Ccy=payment.currency).text = str(
+        f"{payment.amount:.2f}"
+    )
 
     cdtr_agt = etree.SubElement(cdt_trf_tx_inf, "CdtrAgt")
     fin_instn_id = etree.SubElement(cdtr_agt, "FinInstnId")
@@ -99,12 +85,12 @@ def payment(amount, ocr, date):
     etree.SubElement(clr_sys_mmb_id, "MmbId").text = str(9900)
 
     cdtr = etree.SubElement(cdt_trf_tx_inf, "Cdtr")
-    etree.SubElement(cdtr, "Nm").text = "Mottagarnamn"  # FIXME
+    etree.SubElement(cdtr, "Nm").text = payment.issuer
 
     cdtr_acct = etree.SubElement(cdt_trf_tx_inf, "CdtrAcct")
     cdtr_acct_id = etree.SubElement(cdtr_acct, "Id")
     cdtr_acct_id_othr = etree.SubElement(cdtr_acct_id, "Othr")
-    etree.SubElement(cdtr_acct_id_othr, "Id").text = str(12345)  # FIXME: bankgiro!?!
+    etree.SubElement(cdtr_acct_id_othr, "Id").text = str(payment.account_number)
     schme_nm = etree.SubElement(cdtr_acct_id_othr, "SchmeNm")
     etree.SubElement(schme_nm, "Prtry").text = "BGNR"
 
@@ -114,55 +100,101 @@ def payment(amount, ocr, date):
     tp = etree.SubElement(cdtr_ref_inf, "Tp")
     cd_or_prtry = etree.SubElement(tp, "CdOrPrtry")
     etree.SubElement(cd_or_prtry, "Cd").text = "SCOR"
-    etree.SubElement(cdtr_ref_inf, "Ref").text = str(1234)  # FIXME: OCR
+    etree.SubElement(cdtr_ref_inf, "Ref").text = str(payment.invoice_number)
+    return cdt_trf_tx_inf
+
+
+def payment_info(debtor, payment):
+    pmt_inf = etree.Element("PmtInf")
+    etree.SubElement(pmt_inf, "PmtInfId").text = str(payment.invoice_number)
+    etree.SubElement(pmt_inf, "PmtMtd").text = "TRF"
+
+    etree.SubElement(pmt_inf, "ReqdExctnDt").text = payment.date_due  # FIXME
+
+    dbtr = etree.SubElement(pmt_inf, "Dbtr")
+    nm = etree.SubElement(dbtr, "Nm")
+    nm.text = debtor.name
+    dbtr.append(id_entry(debtor.id_nbr))
+    etree.SubElement(dbtr, "CtryOfRes").text = debtor.country
+
+    dbtr_acct = etree.SubElement(pmt_inf, "DbtrAcct")
+    dbtr_acct_id = etree.SubElement(dbtr_acct, "Id")
+    etree.SubElement(dbtr_acct_id, "IBAN").text = str(debtor.iban)
+
+    dbtr_agt = etree.SubElement(pmt_inf, "DbtrAgt")
+    fin_inst_id = etree.SubElement(dbtr_agt, "FinInstnId")
+    etree.SubElement(fin_inst_id, "BIC").text = debtor.bic
+
+    cdt_trf_tx_inf = credit_transfer(payment)
+    pmt_inf.append(cdt_trf_tx_inf)
 
     return pmt_inf
 
 
+class PAINFile:
+
+    """..."""
+
+    def __init__(self, debtor, payments):
+        self.debtor = debtor
+        self.payments = payments
+
+    @property
+    def total_amount(self):
+        return sum(payment.amount for payment in self.payments)
+
+    @property
+    def group_header(self):
+        grp_hdr = etree.Element("GrpHdr")
+        etree.SubElement(grp_hdr, "MsgId").text = str(int(time.time()))
+        etree.SubElement(grp_hdr, "CreDtTm").text = datetime.datetime.now().isoformat(
+            timespec="seconds"
+        )
+        etree.SubElement(grp_hdr, "NbOfTxs").text = str(len(self.payments))
+        etree.SubElement(grp_hdr, "CtrlSum").text = str(f"{self.total_amount:.2f}")
+        grp_hdr.append(initg_pty(self.debtor.id_nbr))
+        return grp_hdr
+
+    def tmp(self):
+        root = etree.Element("Document", nsmap=NSMAP)
+        cstmr_cdt_tr_initn = etree.SubElement(root, "CstmrCdtTrfInitn")
+        cstmr_cdt_tr_initn.append(self.group_header)
+
+        for payment in self.payments:
+            pmt_inf = payment_info(self.debtor, payment)
+            cstmr_cdt_tr_initn.append(pmt_inf)
+
+        return root
+
+
 def _cli():
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", metavar="INPUT", help="*.toml file", type=Path)
+    parser.add_argument("input", metavar="INPUT", help="*.json file", type=Path)
+    parser.add_argument("-c", "--config", help="*.toml file", type=Path)
     args = parser.parse_args()
 
-    root = etree.Element("Document", nsmap=NSMAP)
+    config = toml.load(args.config)
 
-    # Group header
-    grp_hdr = etree.Element("GrpHdr")
-    msg_id = etree.SubElement(grp_hdr, "MsgId")
-    msg_id.text = str(1)  # FIXME
-    cre_dt_tm = etree.SubElement(grp_hdr, "CreDtTm")
-    cre_dt_tm.text = datetime.datetime.now().isoformat(timespec="seconds")
-    nbr_of_txs = etree.SubElement(grp_hdr, "NbOfTxs")
-    nbr_of_txs.text = str(1)  # FIXME
-    ctrl_sum = etree.SubElement(grp_hdr, "CtrlSum")
-    ctrl_sum.text = str(f"{1000:.2f}")  # FIXME
-    grp_hdr.append(initg_pty(11111))  # FIXME
+    with open(args.input, "r") as json_file:
+        data = json.load(json_file)
+    field_names = set(f.name for f in dataclasses.fields(Payment))
+    payments = [
+        Payment(**{k: v for k, v in e.items() if k in field_names}) for e in data
+    ]
 
-    cstmr_cdt_tr_initn = etree.SubElement(root, "CstmrCdtTrfInitn")
-    cstmr_cdt_tr_initn.append(grp_hdr)
+    debtor = Debtor(**config["Debtor"])
 
-    payment_0 = payment(500, 1234, datetime.date(2024, 2, 29))
-    cstmr_cdt_tr_initn.append(payment_0)
+    pain = PAINFile(debtor, payments)
 
-    #output_filename = f"{args.input.stem}.xml"
+    # output_filename = f"{args.input.stem}.xml"
     output_filename = "tmp.xml"
-    tree = etree.ElementTree(root)
+    tree = etree.ElementTree(pain.tmp())
     tree.write(
         output_filename,
         encoding="utf-8",
         xml_declaration=True,
         pretty_print=True,
     )
-
-    """
-    # Skattverket's parser doesn't like single quotes...
-    # https://github.com/lxml/lxml/pull/277
-    with open(output_filename, "r+b") as f:
-        old = f.readline()
-        new = old.replace(b"'", b'"')
-        f.seek(0)
-        f.write(new)
-    """
 
 
 if __name__ == "__main__":
