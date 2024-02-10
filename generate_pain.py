@@ -13,6 +13,8 @@ from pathlib import Path
 
 import toml
 
+import date_finder
+
 
 @dataclasses.dataclass
 class Payment:
@@ -182,6 +184,17 @@ def _cli():
     ]
 
     debtor = Debtor(**config["Debtor"])
+
+    bank_days = date_finder.BankDays(debtor.country)
+    last_bank_day_of_month = bank_days.last_bank_day_of_current_month()
+    next_bank_day = bank_days.next_bank_day()
+    # Update date_due
+    for payment in payments:
+        date_due =  datetime.date.fromisoformat(payment.date_due)
+        if date_due <= next_bank_day:
+            payment.date_due = str(next_bank_day)
+        elif date_due >= last_bank_day_of_month:
+            payment.date_due = str(last_bank_day_of_month)
 
     pain = PAINFile(debtor, payments)
 
