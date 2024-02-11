@@ -1,13 +1,8 @@
-"""...
-
-https://www.nordea.com/en/doc/corporate-access-payables-pain-001-examples-v1.8.pdf
-
-"""
+"""Script for generating pain."""
 import argparse
 import dataclasses
 import datetime
 import json
-import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -49,7 +44,7 @@ def id_entry(org_nbr):
     id_ = ET.Element("Id")
     org_id = ET.SubElement(id_, "OrgId")
     othr = ET.SubElement(org_id, "Othr")
-    ET.SubElement(othr, "Id").text = str(org_nbr.replace("-", ""))
+    ET.SubElement(othr, "Id").text = str(org_nbr)  # FIXME: .replace("-", "") or not..?
     return id_
 
 
@@ -83,7 +78,9 @@ def credit_transfer(payment):
     clr_sys_mmb_id = ET.SubElement(fin_instn_id, "ClrSysMmbId")
     clr_sys_id = ET.SubElement(clr_sys_mmb_id, "ClrSysId")
     ET.SubElement(clr_sys_id, "Cd").text = "SESBA"
-    ET.SubElement(clr_sys_mmb_id, "MmbId").text = str(9900)
+    ET.SubElement(clr_sys_mmb_id, "MmbId").text = str(
+        9900
+    )  # FIXME: Hard-coded for Bankgiro
 
     cdtr = ET.SubElement(cdt_trf_tx_inf, "Cdtr")
     ET.SubElement(cdtr, "Nm").text = payment.issuer
@@ -110,7 +107,7 @@ def payment_info(debtor, payment):
     ET.SubElement(pmt_inf, "PmtInfId").text = str(payment.invoice_number)
     ET.SubElement(pmt_inf, "PmtMtd").text = "TRF"
 
-    ET.SubElement(pmt_inf, "ReqdExctnDt").text = payment.date_due  # FIXME
+    ET.SubElement(pmt_inf, "ReqdExctnDt").text = payment.date_due
 
     dbtr = ET.SubElement(pmt_inf, "Dbtr")
     nm = ET.SubElement(dbtr, "Nm")
@@ -128,17 +125,17 @@ def payment_info(debtor, payment):
 
     cdt_trf_tx_inf = credit_transfer(payment)
     pmt_inf.append(cdt_trf_tx_inf)
-
     return pmt_inf
 
 
 class PAINFile:
 
-    """..."""
+    """PAIN."""
 
     def __init__(self, debtor, payments):
         self.debtor = debtor
         self.payments = payments
+        self.timestamp = datetime.datetime.now()
 
     @property
     def total_amount(self):
@@ -147,8 +144,8 @@ class PAINFile:
     @property
     def group_header(self):
         grp_hdr = ET.Element("GrpHdr")
-        ET.SubElement(grp_hdr, "MsgId").text = str(int(time.time()))
-        ET.SubElement(grp_hdr, "CreDtTm").text = datetime.datetime.now().isoformat(
+        ET.SubElement(grp_hdr, "MsgId").text = str(int(self.timestamp.timestamp()))
+        ET.SubElement(grp_hdr, "CreDtTm").text = self.timestamp.isoformat(
             timespec="seconds"
         )
         ET.SubElement(grp_hdr, "NbOfTxs").text = str(len(self.payments))
@@ -156,7 +153,7 @@ class PAINFile:
         grp_hdr.append(initg_pty(self.debtor.id_nbr))
         return grp_hdr
 
-    def tmp(self):
+    def generate_xml(self):
         root = ET.Element("Document", **NSMAP)
         cstmr_cdt_tr_initn = ET.SubElement(root, "CstmrCdtTrfInitn")
         cstmr_cdt_tr_initn.append(self.group_header)
@@ -165,7 +162,7 @@ class PAINFile:
             pmt_inf = payment_info(self.debtor, payment)
             cstmr_cdt_tr_initn.append(pmt_inf)
 
-        return root
+        return ET.ElementTree(root)
 
 
 def _cli():
@@ -190,7 +187,7 @@ def _cli():
     next_bank_day = bank_days.next_bank_day()
     # Update date_due
     for payment in payments:
-        date_due =  datetime.date.fromisoformat(payment.date_due)
+        date_due = datetime.date.fromisoformat(payment.date_due)
         if date_due <= next_bank_day:
             payment.date_due = str(next_bank_day)
         elif date_due >= last_bank_day_of_month:
@@ -198,9 +195,8 @@ def _cli():
 
     pain = PAINFile(debtor, payments)
 
-    # output_filename = f"{args.input.stem}.xml"
-    output_filename = "tmp.xml"
-    tree = ET.ElementTree(pain.tmp())
+    tree = pain.generate_xml()
+    output_filename = f"pain-{int(pain.timestamp.timestamp())}.xml"
     ET.indent(tree)
     tree.write(
         output_filename,
