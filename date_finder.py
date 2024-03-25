@@ -16,7 +16,7 @@ class BankDays:
         candidate_date = datetime.date.today()
         while True:
             candidate_date += datetime.timedelta(days=1)
-            if candidate_date.weekday() > 5:
+            if candidate_date.weekday() > 4:
                 continue
             if candidate_date in self.national_holidays:
                 continue
@@ -27,7 +27,7 @@ class BankDays:
         today = datetime.date.today()
         for day in range(*reversed(calendar.monthrange(today.year, today.month)), -1):
             candidate_date = datetime.date(today.year, today.month, day)
-            if candidate_date.weekday() > 5:
+            if candidate_date.weekday() > 4:
                 continue
             if candidate_date in self.national_holidays:
                 continue
